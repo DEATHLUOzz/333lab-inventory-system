@@ -1,4 +1,3 @@
-# utils.py
 import streamlit as st
 import json
 import os
@@ -10,21 +9,31 @@ from datetime import datetime, timedelta
 from barcode import Code128
 from barcode.writer import ImageWriter
 import qrcode
+import bcrypt
+import secrets
+import hashlib
+from PIL import Image
+from io import BytesIO
 
 # ===================== 配置 =====================
 DATA_FILE = "items.json"
 LOG_FILE = "logs.json"
-USER_FILE = "users.json"
-BACKUP_DIR = "auto_backups"  # 🆕 自动备份目录
+PRINTED_QR_FILE = "printed_qrs.json"
+# USER_FILE = "users.json"
+LAB_HUNMAN = "lab_human.json"
+USER_LOGGING_FILE = "user_logging.json"
+BACKUP_DIR = "auto_backups"
+QRCODES = "qrcodes"
+
+SECRET_KEY = "my_lab_system_2025_abcxyz"
 ADMIN_PASSWORD = "123456"
 INTERNAL_STAFF_PASSWORD = "1"
 USERNAME = "admin"
 PASSWORD = "adminadmin"
 MANAGER_USERNAME = "1"
 MANAGER_PASSWORD = "1"
-IP_AND_HOST = "192.168.1.106:8501"
+IP_AND_HOST = "192.168.153.13:8501"
 PAGE_ROUTING_MAP = {
-
     "page1": "pages/01_item_checkout.py",
     "page2": "pages/02_item_checkin.py",
     "page3": "pages/03_item_registratio.py",
@@ -33,20 +42,23 @@ PAGE_ROUTING_MAP = {
     "page6": "pages/06_data_admin.py",
     "page7": "pages/er_wei_ma_chuanjianziwangye.py",
 }
+SENDER = "zhaozehao135208412@qq.com"
+AUTH_CODE = "tlvyzexzarqwciif"
 
 
-# ===================== 初始化文件（幂等性） =====================
+
+# ===================== 初始化文件 =====================
 def init_files():
-    for f in [DATA_FILE, LOG_FILE, USER_FILE]:
+    for f in [DATA_FILE, LOG_FILE, USER_LOGGING_FILE, PRINTED_QR_FILE]: # USER_FILE,
         if not os.path.exists(f):
             with open(f, "w", encoding="utf-8") as fp:
                 json.dump([], fp, ensure_ascii=False, indent=2)
-    if not os.path.exists("qrcodes"):
-        os.mkdir("qrcodes")
-    if not os.path.exists(BACKUP_DIR):  # 🆕 初始化备份目录
+    if not os.path.exists(QRCODES):
+        os.mkdir(QRCODES)
+    if not os.path.exists(BACKUP_DIR):
         os.mkdir(BACKUP_DIR)
-    if not os.path.exists("lab_human"):
-        os.mkdir("lab_human")
+        #新
+
 
 # ===================== 数据持久化工具 =====================
 def load_json(path):
@@ -56,7 +68,7 @@ def load_json(path):
 def save_json(path, data):
     with open(path, "w", encoding="utf-8") as fp:
         json.dump(data, fp, ensure_ascii=False, indent=2)
-    # 🆕 每次保存数据后自动触发备份
+    # 每次保存数据后自动触发备份
     auto_backup()
 
 # 登录页面
@@ -83,26 +95,277 @@ def login():
         else:
             st.error("用户名或密码错误")
 
-# ===================== 条码生成工具 =====================
-# 条形码生成
-# def gen_barcode(item_id):
-#     path = f"barcodes/{item_id}"
-#     Code128(item_id, writer=ImageWriter()).save(path)
-#     return path + ".png"
 
-# 二维码生成
+def init_admin():
+    users = load_json(USER_LOGGING_FILE)
+    if users:   # 已经有用户了，不允许再次初始化
+        st.session_state.init_admin = True
+        st.rerun()
+    st.subheader("初始化管理员")
+    username = st.text_input("请输入管理员用户名: ", key="admin_username").strip()
+    password = st.text_input("请输入管理员密码: ", type="password", key="admin_password").strip()
+    reg_email = st.text_input("请输入邮箱", key="reg_email")
+    col1, col2 = st.columns([3, 1]) # 创建两列，邮箱/按钮布局更美观
+    with col1:
+            reg_verify_code = st.text_input("请输入验证码", key="reg_verify_code")
+    with col2:
+        # 增加一个垂直间距，使按钮与输入框对齐
+        st.write("") 
+        st.write("")
+        if st.button("发送验证码", key="btn_send_code"):
+            if not reg_email:
+                st.warning("请先输入邮箱地址")
+            else:
+                with st.spinner("正在发送验证码..."):
+                    code = send_verify_code(reg_email)
+                    if code:
+                        st.session_state.sent_code = code # 将验证码存入 session_state
+                        st.session_state.code_expire_time = time.time() + 300 # 记录过期时间（5分钟）
+                        st.success("验证码已发送，请查收邮箱")
+                    else:
+                        st.error("验证码发送失败，请稍后重试")
+    if st.button("立即注册"):
+        if username in users:  # 检测用户名是否已存在
+            st.error("用户名已存在，请换一个！")
+        elif not username:
+            st.warning("用户名不能为空")
+        elif not password:
+            st.warning("密码不能为空")
+        elif not reg_email:
+            st.warning("邮箱不能为空")
+        elif not reg_verify_code:
+            st.warning("验证码不能为空")
+        else:
+            if st.session_state.sent_code is False:
+                st.warning("请先发送验证码到邮箱")
+            elif reg_verify_code != str(st.session_state.sent_code):
+                st.error("验证码错误")
+            elif time.time() > st.session_state.code_expire_time:
+                st.error("验证码已过期，请重新发送")
+            else:
+                hashed = hash_password(password)
+                save_user(username, hashed, reg_email, role="admin")
+                st.success("注册成功！可以去登录了") 
+
+def login_hash():
+    if 'sent_code' not in st.session_state:
+        st.session_state.sent_code = False
+    if 'code_expire_time' not in st.session_state:
+        st.session_state.code_expire_time = 0
+
+    tab1, tab2 = st.tabs(["登录", "注册"])
+
+    with tab2:
+        st.subheader("用户注册")
+        users = load_json(USER_LOGGING_FILE)
+        reg_user = st.text_input("设置用户名", key="reg_user")
+        users_found = None
+        for i, it in enumerate(users):
+            if it["username"] == reg_user:
+                users_found = i
+                break
+        if users_found is not None:
+            st.error("用户名已存在")
+
+        reg_pwd = st.text_input("设置密码", type="password", key="reg_pwd")
+        reg_email = st.text_input("请输入邮箱", key="reg_email")
+        col1, col2 = st.columns([3, 1]) # 创建两列，邮箱/按钮布局更美观
+        with col1:
+            reg_verify_code = st.text_input("请输入验证码", key="reg_verify_code")
+        with col2:
+            # 增加一个垂直间距，使按钮与输入框对齐
+            st.write("") 
+            st.write("")
+            if st.button("发送验证码", key="btn_send_code"):
+                if not reg_email:
+                    st.warning("请先输入邮箱地址")
+                else:
+                    with st.spinner("正在发送验证码..."):
+                        code = send_verify_code(reg_email)
+                        if code:
+                            st.session_state.sent_code = code # 将验证码存入 session_state
+                            st.session_state.code_expire_time = time.time() + 300 # 记录过期时间（5分钟）
+                            st.success("验证码已发送，请查收邮箱")
+                        else:
+                            st.error("验证码发送失败，请稍后重试")
+        # reg_verify_code = st.text_input("请输入验证码", key="reg_verify_code")
+        if st.button("立即注册"):
+            if reg_user in users:  # 检测用户名是否已存在
+                st.error("用户名已存在，请换一个！")
+            elif not reg_user:
+                st.warning("用户名不能为空")
+            elif not reg_pwd:
+                st.warning("密码不能为空")
+            elif not reg_email:
+                st.warning("邮箱不能为空")
+            elif not reg_verify_code:
+                st.warning("验证码不能为空")
+            else:
+                if st.session_state.sent_code is False:
+                    st.warning("请先发送验证码到邮箱")
+                elif time.time() > st.session_state.code_expire_time:
+                    st.error("验证码已过期，请重新发送")
+                elif reg_verify_code != str(st.session_state.sent_code):
+                    st.error("验证码错误")
+                else:
+                    hashed = hash_password(reg_pwd)
+                    save_user(reg_user, hashed, reg_email, role="user")
+                    st.success("注册成功！可以去登录了") 
+
+
+            # users = load_json(USER_LOGGING_FILE)
+            # if reg_user in users:
+            #     st.error("用户名已存在，请换一个！")
+            # elif reg_user and reg_pwd:
+            #     # 密码加密
+            #     hashed = hash_password(reg_pwd)
+            #     # 保存哈希后的密码
+            #     save_user(reg_user, hashed, role="user")
+            #     st.success("注册成功！可以去登录了")
+            # else:
+            #     st.warning("用户名和密码不能为空")
+
+    with tab1:
+        st.subheader("用户登录")
+        login_user = st.text_input("用户名", key="login_user")
+        login_pwd = st.text_input("密码", type="password", key="login_pwd")
+        if st.button("登录"):
+            users = load_json(USER_LOGGING_FILE)
+            users_found = None
+            for i, it in enumerate(users):
+                if it["username"] == login_user:
+                    users_found = i
+                    break
+            if users_found is None:
+                st.error("用户名不存在")
+            else:
+                # 取出数据库里的哈希密码进行校验
+                db_hashed_pwd = users[users_found]["hashed_pwd"]
+                if check_password(login_pwd, db_hashed_pwd):
+                    token, timestamp, nonce = generate_token(login_user)
+                    st.session_state.user = login_user  # 登录成功后生成动态Token
+                    st.session_state.token = token
+                    st.session_state.timestamp = timestamp
+                    st.session_state.nonce = nonce
+                    if verify_token(st.session_state.get("user"), 
+                                    st.session_state.get("token"), 
+                                    st.session_state.get("timestamp"), 
+                                    st.session_state.get("nonce")):  # 测试Token验证
+                        st.session_state.logged_in = True
+                        if users[users_found].get("role") == "admin":
+                            st.session_state.logged_in_manager = True
+                        st.success("登录成功!")
+                        time.sleep(0.5)
+                        st.rerun()
+                    else:
+                        st.session_state.logged_in = False
+                        st.error("Token验证失败，用户未登录或Token无效")
+                else:
+                    st.error("密码错误")
+
+
+# 保存用户
+def save_user(username, hashed_pwd, email, role="user"):
+    users = load_json(USER_LOGGING_FILE)
+    users.append({"username": username, "hashed_pwd": hashed_pwd,"create_time": time.strftime("%Y-%m-%d %H:%M"),"role": role,"user_email":email})
+    with open(USER_LOGGING_FILE, "w", encoding="utf-8") as f:
+        json.dump(users, f, ensure_ascii=False, indent=2)
+
+# 密码哈希加密
+def hash_password(raw_pwd):
+    # 先转bytes，加盐哈希
+    pwd_bytes = raw_pwd.encode("utf-8")
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(pwd_bytes, salt)
+    return hashed.decode("utf-8")
+
+# 密码校验
+def check_password(raw_pwd, hashed_pwd):
+    pwd_bytes = raw_pwd.encode("utf-8")
+    hashed_bytes = hashed_pwd.encode("utf-8")
+    return bcrypt.checkpw(pwd_bytes, hashed_bytes)
+
+# token
+# token的生成必须用SHA256算法，不能用bcrypt
+def generate_token(username: str) -> str:
+    """生成动态Token"""
+    # 时间戳 + 随机串
+    timestamp = str(int(time.time()))
+    nonce = secrets.token_hex(6)
+    
+    # 拼接原始字符串
+    raw_str = f"{username}{timestamp}{nonce}{SECRET_KEY}"
+    
+    # SHA256 哈希作为Token
+    token = hashlib.sha256(raw_str.encode("utf-8")).hexdigest()
+    return token, timestamp, nonce
+
+def verify_token(username: str, token: str, timestamp: str, nonce: str) -> bool:
+    """验证Token是否合法"""
+    raw_str = f"{username}{timestamp}{nonce}{SECRET_KEY}"
+    calc_token = hashlib.sha256(raw_str.encode("utf-8")).hexdigest()
+    return calc_token == token
+
+
+
+# 绑定邮箱，发送验证码
+def send_verify_code(email):
+    """发送验证码，传入内容为目标邮箱地址，返回生成的验证码（如果发送失败则返回None）"""
+    import smtplib
+    import random
+    from email.mime.text import MIMEText
+    code = random.randint(100000, 999999)
+    sender = SENDER
+    auth_code = AUTH_CODE
+    smtp_server = "smtp.qq.com"
+    port = 587
+
+    msg = MIMEText(f"你的验证码是：{code}，5分钟内有效", "plain", "utf-8")
+    msg["Subject"] = "邮箱验证"
+    msg["From"] = sender
+    msg["To"] = email
+
+    try:
+        server = smtplib.SMTP(smtp_server, port)
+        server.starttls()
+        server.login(sender, auth_code)
+        server.sendmail(sender, email, msg.as_string())
+        server.quit()
+        return code
+        
+    except:
+        return None
+
+
+# # 二维码生成
+# def gen_qrcode(item_id):
+#     """生成二维码，内容为访问物品详情页的URL"""
+#     path = f"qrcodes/{item_id}.png"
+#     qr = qrcode.QRCode(
+#         version=1,
+#         error_correction=qrcode.constants.ERROR_CORRECT_L,
+#         box_size=10,
+#         border=4,
+#     )
+#     qr.add_data(f"http://{IP_AND_HOST}/?item_id={item_id}&goto=page7")
+#     qr.make(fit=True)
+#     qr.make_image(fit=True).save(path)
+#     return path
+
+# 纯内存生成二维码
 def gen_qrcode(item_id):
-    path = f"qrcodes/{item_id}.png"
+    """纯内存生成二维码，返回PIL Image对象，不保存任何文件到磁盘"""
     qr = qrcode.QRCode(
         version=1,
-        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,  # 保留你原来的L级别
         box_size=10,
         border=4,
     )
+    # 二维码内容与你原来完全一致：完整的访问URL
     qr.add_data(f"http://{IP_AND_HOST}/?item_id={item_id}&goto=page7")
     qr.make(fit=True)
-    qr.make_image(fit=True).save(path)
-    return path
+    img = qr.make_image(fill_color="black", back_color="white")
+    return img  # ✅ 直接返回PIL Image对象，不保存文件
 
 
 
@@ -111,26 +374,31 @@ def is_valid_phone(phone):
     """校验手机号：11位数字"""
     return re.match(r'^\d{11}$', phone) is not None
 
-def get_or_create_user(user_id, name, user_class, source):
+def get_or_create_user(user_name, name, user_class,user_phone):
     """获取或创建人员档案，返回用户对象"""
-    users = load_json(USER_FILE)
-    existing = next((u for u in users if u['user_id'] == user_id), None)
-    if existing:
-        existing['name'] = name
-        existing['class'] = user_class
-        save_json(USER_FILE, users)
-        return existing
-    else:
-        new_user = {
-            "user_id": user_id,
-            "name": name,
-            "class": user_class,
-            "source": source,
-            "create_time": time.strftime("%Y-%m-%d %H:%M")
-        }
-        users.append(new_user)
-        save_json(USER_FILE, users)
-        return new_user
+    users = load_json(USER_LOGGING_FILE)
+    # user_found = next((u for u in users if u['user_id'] == user_id), None)
+    user_found = None
+    for i, it in enumerate(users):
+        if it["username"] == user_name:
+            user_found = i
+            break
+    if user_found+1:
+        users[user_found]["name"] = name
+        users[user_found]["user_class"] = user_class
+        users[user_found]["user_phone"] = user_phone
+        save_json(USER_LOGGING_FILE, users)
+        return user_found
+    # else:
+    #     new_user = {
+    #         "name": name,
+    #         "class": user_class,
+    #         "phone": user_phone,
+    #         "create_time": time.strftime("%Y-%m-%d %H:%M")
+    #     }
+    #     users.append(new_user)
+    #     save_json(USER_LOGGING_FILE, users)
+    #     return new_user
 
 # def cheak_is_labhuman(user_id):
 
@@ -154,7 +422,7 @@ def check_near_expiry(items):
 def generate_excel_backup():
     """生成Excel备份数据（用于手动下载）"""
     items = load_json(DATA_FILE)
-    users = load_json(USER_FILE)
+    users = load_json(USER_LOGGING_FILE)
     logs = load_json(LOG_FILE)
 
     output = BytesIO()
@@ -251,16 +519,6 @@ def render_alerts():
             else:
                 st.info(f"- 🟡 【{a['item_name']}】(ID:{a['item_id']}) 将在 {days} 天后到期。(使用人: {a['user']})")
 
-#跳转函数，传入想要跳转页面，以及需要传递的参数，
-# def goto_page(page_name, state):
-
-#     if f"target_{state}" not in st.session_state:
-#         st.session_state[f"target_{state}"] = False
-#     state = st.query_params.get(f"{state}", "")
-#     if st.session_state.get("logged_in") and state:
-#         st.session_state[f"target_{state}"] = state
-#         state = None
-#         st.switch_page(page_name)
 
 def goto_page(page_name: str, params: dict = None):
     """
@@ -270,48 +528,20 @@ def goto_page(page_name: str, params: dict = None):
         page_name (str): 目标页面路径，例如 "pages/detail.py"
         params (dict, optional): 需要传递的参数字典，例如 {"item_id": "123", "mode": "edit"}
     """
-    print("进入goto_page")
     if params is None:
         params = {}
-    
-    # 2. 获取 URL 中的查询参数 (Query Params)
-    # 注意：st.query_params 在 Streamlit 1.37+ 中行为类似字典
-    # query_params = st.query_params
-    
-    # 3. 合并 URL 参数和手动传入的参数
-    # URL 参数优先级通常较高，或者你可以选择手动传入优先，这里以手动传入为主，URL为辅
     final_params = {}
     
     # 先放入手动传入的
     final_params.update(params)
     
-    # 如果手动没传，尝试从 URL 获取 (假设 URL key 和 session_state key 一致)
-    # for key in params.keys():
-    #     if key not in final_params or not final_params[key]:
-    #         url_val = query_params.get(key, "")
-    #         if url_val:
-    #             final_params[key] = url_val
-
-    # 4. 检查登录状态
-    # is_logged_in = st.session_state.get("logged_in", False)
-    
-    # if not is_logged_in:
-    #     # 如果未登录，保存当前想要访问的参数和目标页面，以便登录后跳回
-    #     st.session_state["pending_redirect"] = {
-    #         "page": page_name,
-    #         "params": final_params
-    #     }
-    #     st.switch_page("pages/login.py")  # 确保你有这个登录页面
-    #     return
-
-    # 5. 如果已登录且有参数，存入 session_state
     if final_params:
         # 使用一个统一的前缀或专门的字典来存储跳转参数，避免污染全局 namespace
         # 这里我们直接存入 st.session_state，但建议加上前缀以防冲突，例如 "goto_params_"
         for key, value in final_params.items():
             st.session_state[f"goto_{key}"] = value
             
-        print(f"goto_page_query_params: {st.query_params}")
+        # print(f"goto_page_query_params: {st.query_params}")
         # 6. 执行跳转
         try:
             st.switch_page(page_name)
@@ -336,7 +566,6 @@ def handle_redirect(goto:str = None, params: dict = None):
         goto (str): 目标页面标识符
         params (dict): 获取的查询参数字典，例如 {"item_id": "123"}
     """
-    print("进入handle_redirect")
     goto_where = goto
     if goto is None:
         goto_where = st.query_params.get("goto","")
@@ -344,11 +573,15 @@ def handle_redirect(goto:str = None, params: dict = None):
     if params is None:
         params = {}
         params = {k: v for k, v in st.query_params.items() if k != "goto"}
-    print (f"handle_redirect_params:{params}")
-    print(f"handle_redirect_goto_where:{goto_where}")
+    # print (f"handle_redirect_params:{params}")
+    # print(f"handle_redirect_goto_where:{goto_where}")
     if goto_where and goto_where in PAGE_ROUTING_MAP:
         target_page = PAGE_ROUTING_MAP[goto_where]
         # print(f"跳转至{target_page}")
         # print(params)
-        print(f"handle_redirect_query_params: {st.query_params}")
-        goto_page(page_name=target_page,params=params)
+        # print(f"handle_redirect_query_params: {st.query_params}")
+        try:
+            goto_page(page_name=target_page,params=params)
+        except Exception as e:
+            st.error(f"跳转至{target_page}失败，请检查参数是否正确")
+            print(e)
