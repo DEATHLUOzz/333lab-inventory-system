@@ -57,8 +57,8 @@ else:
                 # st.write(f"**来源**: {u['source']}")
                 # 可编辑字段
                 new_name = st.text_input("姓名", u['name'], key=f"name_{u['username']}")
-                new_class = st.text_input("班级/单位", u['class'], key=f"cls_{u['username']}")
-                new_phone = st.text_input("手机号", u['phone'], key=f"phone_{u['username']}")
+                new_class = st.text_input("班级/单位", u['user_class'], key=f"cls_{u['username']}")
+                new_phone = st.text_input("手机号", u['user_phone'], key=f"phone_{u['username']}")
                 
                 if st.button("更新人员信息", key=f"save_{u['username']}"):
                     # 回写数据
@@ -66,8 +66,8 @@ else:
                     for idx, user_in_list in enumerate(all_users):
                         if user_in_list['username'] == u['username']:
                             all_users[idx]['name'] = new_name
-                            all_users[idx]['class'] = new_class
-                            all_users[idx]['phone'] = new_phone
+                            all_users[idx]['user_class'] = new_class
+                            all_users[idx]['user_phone'] = new_phone
                             break
                     save_json("user_logging.json", all_users)
                     st.success("人员信息已更新")

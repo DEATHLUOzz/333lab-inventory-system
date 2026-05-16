@@ -38,13 +38,13 @@ if st.session_state.init_admin:
 
 # 默认只有login页面
 if st.session_state.logged_in:
-    page1 = st.Page("pages\\01_item_checkout.py", title="01_扫码领用")
-    page2 = st.Page("pages\\02_item_checkin.py", title="02_扫码归还")
-    page7 = st.Page("pages\\er_wei_ma_chuanjianziwangye.py", title="07_物品详情")
-    page3 = st.Page("pages\\03_item_registratio.py", title="03_录入新物品")
-    page4 = st.Page("pages\\04_item_inventory.py", title="04_物品总览")
-    page5 = st.Page("pages\\05_transaction_logs.py", title="05_借用记录")
-    page6 = st.Page("pages\\06_data_admin.py", title="06_数据备份管理")
+    page1 = st.Page("pages\\01_item_checkout.py", title="扫码领用")
+    page2 = st.Page("pages\\02_item_checkin.py", title="扫码归还")
+    page7 = st.Page("pages\\07_item_details.py", title="物品详情")
+    page3 = st.Page("pages\\03_item_registration.py", title="录入新物品")
+    page4 = st.Page("pages\\04_item_inventory.py", title="物品总览")
+    page5 = st.Page("pages\\05_transaction_logs.py", title="借用记录")
+    page6 = st.Page("pages\\06_data_admin.py", title="数据备份管理")
 
     pg = st.navigation({"主要功能": [page1, page2, page7], "管理员功能": [page3, page4, page5, page6] if st.session_state.logged_in_manager else []})
 # if st.session_state.logged_in_manager:

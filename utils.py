@@ -36,11 +36,11 @@ IP_AND_HOST = "192.168.153.13:8501"
 PAGE_ROUTING_MAP = {
     "page1": "pages/01_item_checkout.py",
     "page2": "pages/02_item_checkin.py",
-    "page3": "pages/03_item_registratio.py",
+    "page3": "pages/03_item_registration.py",
     "page4": "pages/04_item_inventory.py",
     "page5": "pages/05_transaction_logs.py",
     "page6": "pages/06_data_admin.py",
-    "page7": "pages/er_wei_ma_chuanjianziwangye.py",
+    "page7": "pages/07_item_details.py",
 }
 SENDER = "zhaozehao135208412@qq.com"
 AUTH_CODE = "tlvyzexzarqwciif"

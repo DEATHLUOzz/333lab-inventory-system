@@ -44,8 +44,10 @@ else:
             display_data.append({
                 "ID": it["item_id"],
                 "名称": it["item_name"],
-                "状态": display_status, # 🆕 这里直接存带图标的字符串
-                "使用人": it["user"] or "-",
+                "状态": display_status, # 
+                "使用人账号": it["username"] or "-",
+                "使用人": it["name"] or "-",
+                "班级": it.get("user_class", "-"),
                 "电话": it.get("user_phone", "-"),
                 "用途": it.get("usage", "-"),
                 "借用日": it.get("take_time", "-"),
@@ -72,7 +74,7 @@ else:
         for idx, it in enumerate(items):
             stat = it["status"]
             with st.expander(f"[{stat}] {it['item_name']} ({it['item_id']})"):
-                st.write(f"**使用人**: {it['user'] or '无'}")
+                st.write(f"**使用人**: {it['name'] or '无'}")
                 st.write(f"**用途**: {it.get('usage', '无')}")
                 st.write(f"**电话**: {it.get('user_phone', '无')}")
                 st.write(f"**邮箱**: {it.get('user_email', '无')}")
